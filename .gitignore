@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Ambiente / credenciais
+.env
+.env.local
+.env.*.local
+
+# Certificados digitais (NUNCA commitar)
+*.p12
+*.pfx
+*.pem
+*.key
+*.crt
+*.cer
+
+# Dados sensíveis gerados em runtime
+data/clients.json
+data/nfse_log.json
+data/rps_counter.json
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
