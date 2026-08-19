@@ -33,6 +33,7 @@ from nfse_mcp.xml_builder import (
     build_inf_declaracao_xml,
 )
 from nfse_mcp.xml_signer import XmlSigner
+from nfse_mcp.nacional.tools import register_nacional_tools
 from lxml import etree
 
 logger = logging.getLogger(__name__)
@@ -918,6 +919,9 @@ def query_cadastral_data() -> str:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
+register_nacional_tools(mcp)
+
 
 def main():
     """Run the NFS-e MCP server."""
