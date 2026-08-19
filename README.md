@@ -14,7 +14,7 @@ Desenvolvido originalmente para o uso interno da **Softtor Soluções Transforma
 
 ## Status
 
-Em **produção** para a Softtor desde 2025. Testado contra o webservice oficial `df.issnetonline.com.br`. Adapta-se a qualquer prestador com certificado digital A1 e cadastro ativo na prefeitura de Brasília.
+Em **produção** para a Softtor desde 2025. Testado contra o webservice oficial `df.issnetonline.com.br` (ABRASF 2.04). Adapta-se a qualquer prestador com certificado digital A1 e cadastro ativo na prefeitura de Brasília.
 
 ## Requisitos
 
@@ -73,6 +73,18 @@ Campos essenciais:
 | `list_nfse` | Lista NFS-e por período com valores |
 | `query_cadastral_data` | Dados cadastrais do prestador no webservice |
 
+### Padrão Nacional DF (homologação, experimental)
+
+Módulo técnico em `src/nfse_mcp/nacional/`. **Não** é o caminho de produção. ABRASF 2.04 continua sendo o que emite nota real.
+
+- Gate: `NFSE_NACIONAL_ENABLED=1` e `NFSE_NACIONAL_ENVIRONMENT=homologation` (padrão: desligado; as tools recusam a chamada)
+- Endpoint usado: `https://nfse.issnetonline.com.br/wsnfsenacional/homologacao/nfse.asmx`
+- URL de produção DF (`https://nfse.fazenda.df.gov.br/wsnfsenacional/nfse.asmx`) **não é usada**
+- Certificado A1 ICP-Brasil obrigatório (mTLS). Sem o cert, asmx/WSDL retorna **HTTP 403**
+- Tools: `nacional_homolog_emit_nfse`, `nacional_homolog_query_nfse`, `nacional_homolog_cancel_nfse`
+
+Detalhe do contrato SOAP e o risco de `GerarNfse`: [src/nfse_mcp/nacional/README.md](src/nfse_mcp/nacional/README.md).
+
 ## Integração com Claude Code
 
 Adicione ao `~/.claude/mcp.json`:
@@ -107,6 +119,10 @@ uv run nfse-mcp
 
 # Sanity check de importação
 uv run python -c "from nfse_mcp.server import main; print('OK')"
+
+# Testes (SOAP Nacional mockado; sem certificado A1 no CI)
+uv sync --extra dev
+uv run pytest
 ```
 
 Estrutura do projeto:
@@ -114,15 +130,22 @@ Estrutura do projeto:
 ```
 nfse-mcp/
 ├── src/nfse_mcp/
-│   ├── server.py         # MCP server + 9 tools (entrypoint)
-│   ├── config.py         # Carrega .env → Config dataclass
+│   ├── server.py         # MCP server + 9 tools ABRASF 2.04 + registro das 3 tools Nacional
+│   ├── config.py         # Carrega .env → Config ABRASF 2.04
 │   ├── models.py         # Dataclasses de domínio
 │   ├── certificate.py    # Lê PFX/PKCS12
-│   ├── xml_signer.py     # XML-DSig SHA-1 manual
+│   ├── xml_signer.py     # XML-DSig SHA-1 ABRASF 2.04
 │   ├── xml_builder.py    # Monta XMLs ABRASF 2.04
-│   ├── soap_client.py    # Cliente SOAP raw (sem zeep)
+│   ├── soap_client.py    # Cliente SOAP ABRASF 2.04
 │   ├── cnpj_lookup.py    # BrasilAPI
-│   └── client_store.py   # CRUD de clientes
+│   ├── client_store.py   # CRUD de clientes
+│   └── nacional/         # Adapter DF Padrão Nacional (homolog-only, gated)
+│       ├── config.py
+│       ├── xml_builder.py
+│       ├── xml_signer.py
+│       ├── soap_client.py
+│       └── tools.py      # emit / query / cancel
+├── tests/                # pytest; SOAP Nacional mockado
 ├── data/                 # Runtime (clients.json, nfse_log.json — gitignored)
 └── schemas/
     └── schema_v204.xsd   # XSD ABRASF 2.04 (referência)
@@ -133,9 +156,10 @@ Para detalhes técnicos, armadilhas do webservice e fluxo de assinatura XML, vej
 ## Limitações conhecidas
 
 - **Escopo geográfico:** funciona apenas com o webservice ISS.net de **Brasília/DF**. Outras prefeituras usam endpoints e variações do padrão ABRASF diferentes.
-- **Padrão:** ABRASF 2.04 apenas. Prefeituras em versões anteriores (1.00, 2.00) não são suportadas.
-- **Método de emissão:** `GerarNfse` individual. O `emit_nfse_batch` emite uma nota por vez (não usa `RecepcionarLoteRpsSincrono`, que apresenta problemas de validação não documentados no webservice de Brasília).
-- **Sem testes automatizados:** validação feita em produção contra notas reais. PRs com testes são muito bem-vindos.
+- **Padrão em produção:** ABRASF 2.04. O adapter Nacional DF é homolog-only e fica atrás de `NFSE_NACIONAL_ENABLED`.
+- **Método de emissão ABRASF:** `GerarNfse` individual. O `emit_nfse_batch` emite uma nota por vez (não usa `RecepcionarLoteRpsSincrono`, que apresenta problemas de validação não documentados no webservice de Brasília).
+- **Nacional V1 não implementa:** produção, lote, multi-CNPJ, portal nacional, consulta por faixa/período, substituição.
+- **WSDL Nacional:** `https://nfse.issnetonline.com.br/wsnfsenacional/homologacao/nfse.asmx?wsdl` exige certificado A1 (mTLS). Sem A1 a URL devolve HTTP 403. O teste live de homologação é skipado no CI sem A1.
 
 ## Contribuindo
 

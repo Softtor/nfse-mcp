@@ -24,6 +24,11 @@ dependencies = [
     "python-dotenv>=1.0.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
 [project.urls]
 Repository = "https://github.com/Softtor/nfse-mcp"
 Issues = "https://github.com/Softtor/nfse-mcp/issues"
@@ -37,3 +42,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nfse_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
