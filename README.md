@@ -1,6 +1,6 @@
 # nfse-mcp
 
-MCP Server Python para emissão de NFS-e (Nota Fiscal de Serviço Eletrônica) em **Brasília/DF**. O caminho de **produção** é o webservice ISS.net no padrão **ABRASF 2.04**. Existe um SKU separado, **homolog-only**, para o **Padrão Nacional** do DF — ele não substitui o ABRASF 2.04 e não emite em produção.
+MCP Server Python para emissão de NFS-e (Nota Fiscal de Serviço Eletrônica) em **Brasília/DF** através do webservice ISS.net, padrão **ABRASF 2.04**.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
@@ -14,7 +14,7 @@ Desenvolvido originalmente para o uso interno da **Softtor Soluções Transforma
 
 ## Status
 
-Em **produção** para a Softtor desde 2025 via **ABRASF 2.04** (`df.issnetonline.com.br/webservicenfse204`). O Padrão Nacional do DF está disponível apenas como adapter de **homologação** neste repositório; cutover de produção exige decisão humana explícita.
+Em **produção** para a Softtor desde 2025. Testado contra o webservice oficial `df.issnetonline.com.br` (ABRASF 2.04). Adapta-se a qualquer prestador com certificado digital A1 e cadastro ativo na prefeitura de Brasília.
 
 ## Requisitos
 
@@ -73,37 +73,17 @@ Campos essenciais:
 | `list_nfse` | Lista NFS-e por período com valores |
 | `query_cadastral_data` | Dados cadastrais do prestador no webservice |
 
-### Padrão Nacional DF (homologação apenas)
+### Padrão Nacional DF (homologação, experimental)
 
-SKU novo, separado das 9 tools ABRASF 2.04. **Não emite em produção.** Só responde depois de `NFSE_NACIONAL_ENABLED=1` e `NFSE_NACIONAL_ENVIRONMENT=homologation`.
+Módulo técnico em `src/nfse_mcp/nacional/`. **Não** é o caminho de produção. ABRASF 2.04 continua sendo o que emite nota real.
 
-| Tool | Descrição |
-|---|---|
-| `nacional_homolog_emit_nfse` | Emite uma NFS-e no Padrão Nacional contra o WS de homologação |
-| `nacional_homolog_query_nfse` | Consulta NFS-e por número de DPS |
-| `nacional_homolog_cancel_nfse` | Envia pedido de cancelamento (evento e101103) |
+- Gate: `NFSE_NACIONAL_ENABLED=1` e `NFSE_NACIONAL_ENVIRONMENT=homologation` (padrão: desligado; as tools recusam a chamada)
+- Endpoint usado: `https://nfse.issnetonline.com.br/wsnfsenacional/homologacao/nfse.asmx`
+- URL de produção DF (`https://nfse.fazenda.df.gov.br/wsnfsenacional/nfse.asmx`) **não é usada**
+- Certificado A1 ICP-Brasil obrigatório (mTLS). Sem o cert, asmx/WSDL retorna **HTTP 403**
+- Tools: `nacional_homolog_emit_nfse`, `nacional_homolog_query_nfse`, `nacional_homolog_cancel_nfse`
 
-## Padrão Nacional DF — como apontar para homologação
-
-O ABRASF 2.04 **permanece** o caminho de produção. O Nacional é um módulo irmão (`src/nfse_mcp/nacional/`) e só fala com homologação.
-
-1. Use o **mesmo certificado A1** ICP-Brasil (PFX/PKCS12) já configurado em `NFSE_CERTIFICATE_PATH` / `NFSE_CERTIFICATE_PASSWORD`. O WS Nacional exige esse A1 em mTLS; sem ele o asmx/WSDL responde **403**.
-2. No `.env`, **não** mude `NFSE_ENVIRONMENT` para o Nacional. Mantenha produção ABRASF como está e ligue só o SKU novo:
-
-```env
-NFSE_NACIONAL_ENABLED=1
-NFSE_NACIONAL_ENVIRONMENT=homologation
-NFSE_NACIONAL_C_TRIB_NAC=010701
-NFSE_NACIONAL_C_TRIB_MUN=107
-NFSE_NACIONAL_DPS_SERIE=1
-```
-
-3. Endpoint **fixo** neste SKU (não há chave de produção): `https://nfse.issnetonline.com.br/wsnfsenacional/homologacao/nfse.asmx`
-4. Um humano precisa ligar `NFSE_NACIONAL_ENABLED=1`. Com o flag em `0` (padrão), as três tools existem mas recusam a chamada.
-
-Fora de escopo neste V1: cutover de produção, multi-CNPJ, lote, portal nacional, e qualquer API de cálculo tributário extra.
-
-Cronograma público da SEEC/DF (Ato Conjunto RFB/CGIBS nº 4, 2026-07-30): ABRASF 2.04 aceito até 2026-09-30; Padrão Nacional obrigatório a partir de 2026-10-01. Este repositório **não** troca o caminho de produção automaticamente nessa data.
+Detalhe do contrato SOAP e o risco de `GerarNfse`: [src/nfse_mcp/nacional/README.md](src/nfse_mcp/nacional/README.md).
 
 ## Integração com Claude Code
 
@@ -159,7 +139,7 @@ nfse-mcp/
 │   ├── soap_client.py    # Cliente SOAP ABRASF 2.04
 │   ├── cnpj_lookup.py    # BrasilAPI
 │   ├── client_store.py   # CRUD de clientes
-│   └── nacional/         # Adapter DF Padrão Nacional (homolog-only, SKU separado)
+│   └── nacional/         # Adapter DF Padrão Nacional (homolog-only, gated)
 │       ├── config.py
 │       ├── xml_builder.py
 │       ├── xml_signer.py
@@ -176,10 +156,10 @@ Para detalhes técnicos, armadilhas do webservice e fluxo de assinatura XML, vej
 ## Limitações conhecidas
 
 - **Escopo geográfico:** funciona apenas com o webservice ISS.net de **Brasília/DF**. Outras prefeituras usam endpoints e variações do padrão ABRASF diferentes.
-- **Padrão em produção:** ABRASF 2.04. O Padrão Nacional DF neste repo é **homolog-only** (três tools `nacional_homolog_*`).
+- **Padrão em produção:** ABRASF 2.04. O adapter Nacional DF é homolog-only e fica atrás de `NFSE_NACIONAL_ENABLED`.
 - **Método de emissão ABRASF:** `GerarNfse` individual. O `emit_nfse_batch` emite uma nota por vez (não usa `RecepcionarLoteRpsSincrono`, que apresenta problemas de validação não documentados no webservice de Brasília).
 - **Nacional V1 não implementa:** produção, lote, multi-CNPJ, portal nacional, consulta por faixa/período, substituição.
-- **WSDL Nacional:** `https://nfse.issnetonline.com.br/wsnfsenacional/homologacao/nfse.asmx?wsdl` exige certificado A1 (mTLS). Sem A1 a URL devolve HTTP 403; o CI não chama homologação ao vivo.
+- **WSDL Nacional:** `https://nfse.issnetonline.com.br/wsnfsenacional/homologacao/nfse.asmx?wsdl` exige certificado A1 (mTLS). Sem A1 a URL devolve HTTP 403. O teste live de homologação é skipado no CI sem A1.
 
 ## Contribuindo
 

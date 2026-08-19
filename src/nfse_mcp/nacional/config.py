@@ -73,8 +73,8 @@ def homolog_gate(cfg: NacionalConfig) -> str | None:
         )
     if cfg.environment not in ("homologation", "homologacao", "homolog"):
         return (
-            "NFS-e Padrão Nacional (DF) é homolog-only neste SKU. "
+            "NFS-e Padrão Nacional (DF) é homolog-only. "
             "NFSE_NACIONAL_ENVIRONMENT deve ser homologation. "
-            "Não há cutover de produção."
+            "A URL de produção DF Nacional não é usada."
         )
     return None
