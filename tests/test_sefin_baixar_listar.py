@@ -199,3 +199,19 @@ from nfse_mcp.errors import ValidationError  # noqa: E402
 ])
 def test_erro_da_tool_traz_o_detalhe_do_governo(erro, trecho):
     assert tools._erro(erro) == trecho
+
+
+def test_pdf_com_erro_de_rede_vira_erro_do_provider_e_nao_excecao_crua(monkeypatch):
+    c = SefinNacionalClient(MagicMock(environment="production", base_url="https://sefin.invalid", timeout=1), cert=None)
+    monkeypatch.setattr(c, "_get_cert_files", lambda: ("c.pem", "k.pem"))
+
+    def cai(*args, **kwargs):
+        raise requests.ConnectionError("sem rede")
+
+    monkeypatch.setattr(requests, "get", cai)
+    with pytest.raises(SefinNacionalError, match="ConnectionError") as erro:
+        c.get_danfse(CHAVE)
+    assert erro.value.code == "TRANSPORT"
+    provider = SefinNacionalProvider.__new__(SefinNacionalProvider)
+    provider.client = MagicMock(get_danfse=MagicMock(side_effect=erro.value))
+    assert provider.danfse_pdf(CHAVE) is None  # o download segue só com XML + link

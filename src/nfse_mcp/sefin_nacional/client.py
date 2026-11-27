@@ -129,12 +129,15 @@ class SefinNacionalClient:
     def get_danfse(self, chave_acesso: str) -> bytes:
         """GET {ADN}/danfse/{chaveAcesso}: PDF oficial. Em 04/11/2026 o ADN devolve 503/404 (NT 008/2026)."""
         adn = ADN_URLS.get(self.config.environment, ADN_URLS["production_restricted"])
-        response = requests.get(
-            f"{adn}/danfse/{chave_acesso}",
-            cert=self._get_cert_files(),
-            headers={"Accept": "application/pdf"},
-            timeout=self.config.timeout,
-        )
+        try:
+            response = requests.get(
+                f"{adn}/danfse/{chave_acesso}",
+                cert=self._get_cert_files(),
+                headers={"Accept": "application/pdf"},
+                timeout=self.config.timeout,
+            )
+        except requests.RequestException as exc:  # timeout, conexão, TLS: o PDF é opcional
+            raise SefinNacionalError(f"Erro ao baixar DANFSe ({type(exc).__name__})", code="TRANSPORT") from exc
         if response.status_code >= 400:
             raise SefinNacionalError(
                 f"Erro ao baixar DANFSe (HTTP {response.status_code})",
