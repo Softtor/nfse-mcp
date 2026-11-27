@@ -10,8 +10,11 @@ from nfse_mcp.nacional.dps_xml_builder import LEIAUTE_POR_TPAMB
 
 
 # Schemas versionados no repositório (schemas/nacional/).
-# Path relativo ao pacote — nunca absoluto de máquina de dev.
-DEFAULT_SCHEMAS_DIR = Path(__file__).resolve().parents[3] / "schemas" / "nacional"
+# Instalado por wheel: os XSDs vão para dentro do pacote (nfse_mcp/schemas/nacional, ver pyproject).
+# Rodando do checkout: ficam em schemas/nacional na raiz do repositório.
+_NO_PACOTE = Path(__file__).resolve().parents[1] / "schemas" / "nacional"
+_NO_CHECKOUT = Path(__file__).resolve().parents[3] / "schemas" / "nacional"
+DEFAULT_SCHEMAS_DIR = _NO_PACOTE if _NO_PACOTE.is_dir() else _NO_CHECKOUT
 # Esquemas oficiais da Receita, um por leiaute (tpAmb), em schemas/nacional/oficial-*:
 # oficial-20261020 = esquemas_prod_restrita_20261020.zip, sem alteração.
 # oficial-20260209 = nfse-esquemas_xsd-v1-01-20260209.zip (pasta 1.01) com ^/$ tirados dos patterns:

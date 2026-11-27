@@ -38,6 +38,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/nfse_mcp"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"schemas/nacional" = "nfse_mcp/schemas/nacional"
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
