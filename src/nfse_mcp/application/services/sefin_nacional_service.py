@@ -119,18 +119,32 @@ class SefinNacionalApplicationService:
         numero_dps = self._reserve_numero_dps()
         input_data = self._dps_input(command, client, optante, numero_dps, codigo_servico)
         entry = self._log_entry(input_data, client)
+        # Grava antes de enviar: se o processo cair depois da SEFIN aceitar, a próxima emissão
+        # acha esta DPS pendente e consulta, em vez de mandar outro nDPS (nota duplicada).
+        self._log_service.append_nfse_log({**entry, "status": "pendente", "erro": "envio em andamento"})
 
         try:
             result = self._invoice_provider.issue(input_data)
         except (ValidationError, CertificateError):
-            raise  # nada chegou à SEFIN
+            self._atualizar_entrada(entry["id_dps"], status="nao_emitida", erro="nada chegou a SEFIN")
+            raise
         except ProviderError as exc:
             result = self._recover(entry, exc)
 
         if result.success:
-            self._log_service.append_nfse_log({**entry, "status": "emitida", "chave_acesso": result.chave_acesso})
+            self._atualizar_entrada(entry["id_dps"], status="emitida", chave_acesso=result.chave_acesso, erro=None)
 
         return result
+
+    def _atualizar_entrada(self, id_dps: str, **campos) -> None:
+        """Atualiza no log a entrada da DPS; campo None é removido."""
+        log = self._log_service.load_nfse_log()
+        for entrada in log:
+            if entrada.get("provider") == "sefin_nacional" and entrada.get("id_dps") == id_dps:
+                entrada.update(campos)
+                for chave in [c for c, v in campos.items() if v is None]:
+                    entrada.pop(chave, None)
+        self._log_service.save_nfse_log(log)
 
     def _load_client(self, document: str):
         client = self._client_service.find_or_register_client(document)
@@ -250,12 +264,13 @@ class SefinNacionalApplicationService:
         except ProviderError:
             found = False  # não deu para saber
         if found is None and _servidor_recusou(exc):
+            self._atualizar_entrada(entry["id_dps"], status="nao_emitida", erro=exc.message)
             raise exc
         if found and self._matches(found, entry):
             return IssueServiceInvoiceResult(
                 success=True, chave_acesso=found.chave_acesso, id_dps=entry["id_dps"], xml_nfse=found.xml_nfse,
             )
-        self._log_service.append_nfse_log({**entry, "status": "pendente", "erro": exc.message})
+        self._atualizar_entrada(entry["id_dps"], status="pendente", erro=exc.message)
         raise InvoiceError(
             f"NFS-e pendente: a DPS {entry['id_dps']} foi enviada e nao foi possivel confirmar se virou nota "
             f"({exc.message}). Nenhuma outra nota sera emitida para {entry['client_name']} ate a consulta resolver."

@@ -151,7 +151,24 @@ def test_recusa_do_servidor_sem_nota_relanca_erro_original_sem_pendente(tmp_path
                         query=SefinNacionalError("nao achou", code="HTTP_404"))
     with pytest.raises(SefinNacionalError, match="E0312"):
         _service(tmp_path, provider).issue_invoice(_cmd())
-    assert not (tmp_path / "nfse_log.json").exists()
+    assert [e["status"] for e in _log(tmp_path)] == ["nao_emitida"]  # não bloqueia a próxima nota
+
+
+def test_queda_do_processo_no_envio_deixa_a_dps_pendente_no_log(tmp_path):
+    # Se o processo cai depois da SEFIN aceitar, só o log guarda a DPS: a próxima emissão a consulta.
+    provider = Provider(issue_error=KeyboardInterrupt())
+    with pytest.raises(KeyboardInterrupt):
+        _service(tmp_path, provider).issue_invoice(_cmd())
+    [entrada] = _log(tmp_path)
+    assert (entrada["status"], entrada["numero_dps"]) == ("pendente", "1")
+
+    provider.issue_error = None
+    provider.query = QueryServiceInvoiceResult(success=True, chave_acesso="C" * 50, xml_nfse=_nfse_xml())
+    with pytest.raises(InvoiceError, match="foi emitida"):
+        _service(tmp_path, provider).issue_invoice(_cmd())  # acha a nota pela DPS e não emite outra
+    assert provider.queried_dps == ["DPS530010821122233300018100001000000000000001"]
+    assert [i.numero_dps for i in provider.issued] == ["1"]
+    assert _log(tmp_path)[0]["status"] == "emitida"
 
 
 def test_nota_recuperada_de_outro_pedido_nao_conta(tmp_path):
