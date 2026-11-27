@@ -119,7 +119,13 @@ def _build_servico(parent: etree._Element, service: ServiceData, config: Config)
     # Valores
     valores = _sub_group(servico, "Valores")
     _sub(valores, "ValorServicos", service.valor_servicos)
-    aliquota = service.aliquota or config.service_defaults.aliquota
+    if service.aliquota:
+        aliquota = service.aliquota
+    else:
+        cnae_for_lookup = service.cnae or config.service_defaults.cnae
+        cod_trib_for_lookup = service.codigo_tributacao_municipio or config.service_defaults.codigo_tributacao_municipio
+        from nfse_mcp.cnae_table import lookup_aliquota
+        aliquota = lookup_aliquota(cnae_for_lookup, cod_trib_for_lookup) or config.service_defaults.aliquota
     _sub(valores, "Aliquota", aliquota)
 
     iss_retido = service.iss_retido if service.iss_retido else config.service_defaults.iss_retido
@@ -314,7 +320,7 @@ def build_cancelar_nfse_envio(
     codigo_cancelamento: str,
     codigo_municipio: str = "5300108",
 ) -> str:
-    """Build <CancelarNfseEnvio> to cancel an issued NFS-e.
+    """Build <Pedido> for cancellation (to be signed and wrapped in CancelarNfseEnvio).
 
     Args:
         config: Provider/environment configuration.
@@ -322,10 +328,9 @@ def build_cancelar_nfse_envio(
         codigo_cancelamento: Cancellation reason code.
         codigo_municipio: IBGE municipality code (defaults to Brasilia).
 
-    Returns compact XML string.
+    Returns compact XML string of the <Pedido> element.
     """
-    root = _el("CancelarNfseEnvio")
-    pedido = _sub_group(root, "Pedido")
+    pedido = _el("Pedido")
     inf = _sub_group(pedido, "InfPedidoCancelamento")
 
     ident = _sub_group(inf, "IdentificacaoNfse")
@@ -336,6 +341,20 @@ def build_cancelar_nfse_envio(
 
     _sub(inf, "CodigoCancelamento", codigo_cancelamento)
 
+    return _to_xml(pedido)
+
+
+def wrap_cancelar_nfse_envio(pedido_xml: str) -> str:
+    """Wrap a signed <Pedido> XML inside <CancelarNfseEnvio>.
+
+    Args:
+        pedido_xml: The signed <Pedido> XML string.
+
+    Returns compact XML string.
+    """
+    root = _el("CancelarNfseEnvio")
+    pedido_el = etree.fromstring(pedido_xml.encode("utf-8"))
+    root.append(pedido_el)
     return _to_xml(root)
 
 

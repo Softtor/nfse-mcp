@@ -8,94 +8,98 @@ from nfse_mcp.certificate import Certificate
 
 DS_NS = "http://www.w3.org/2000/09/xmldsig#"
 C14N_ALG = "http://www.w3.org/TR/2001/REC-xml-c14n-20010315"
-SIG_ALG = "http://www.w3.org/2000/09/xmldsig#rsa-sha1"
-DIGEST_ALG = "http://www.w3.org/2000/09/xmldsig#sha1"
+
+# SHA-1 (legacy — required by ISS.net Brasilia)
+SIG_ALG_SHA1 = "http://www.w3.org/2000/09/xmldsig#rsa-sha1"
+DIGEST_ALG_SHA1 = "http://www.w3.org/2000/09/xmldsig#sha1"
+
+# SHA-256 (SEFIN Nacional)
+SIG_ALG_SHA256 = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+DIGEST_ALG_SHA256 = "http://www.w3.org/2001/04/xmlenc#sha256"
+
 TRANSFORM_ENVELOPED = "http://www.w3.org/2000/09/xmldsig#enveloped-signature"
 TRANSFORM_C14N = C14N_ALG
 
 
-class XmlSigner:
-    """Signs XML documents for NFS-e ABRASF 2.04 using manual XML-DSig (SHA1 required by webservice)."""
+def _ds_element(tag: str) -> str:
+    """Return a tag in the XML-DSig namespace for searching."""
+    return f"{{{DS_NS}}}{tag}"
 
-    def __init__(self, cert: Certificate):
+
+class XmlSigner:
+    """Signs XML documents using manual XML-DSig.
+
+    Supports both SHA-1 (required by ISS.net Brasilia / ABRASF 2.04)
+    and SHA-256 (used by SEFIN Nacional).
+    """
+
+    def __init__(self, cert: Certificate, use_sha256: bool = False):
         self.cert = cert
+        self.use_sha256 = use_sha256
+        self._sig_alg = SIG_ALG_SHA256 if use_sha256 else SIG_ALG_SHA1
+        self._digest_alg = DIGEST_ALG_SHA256 if use_sha256 else DIGEST_ALG_SHA1
+        self._hash_alg = hashes.SHA256() if use_sha256 else hashes.SHA1()
 
     def sign_xml(self, xml_string: str, reference_uri: str = "") -> str:
         root = etree.fromstring(xml_string.encode("utf-8"))
 
         # Remove existing Signature
-        for sig in root.findall(f"{{{DS_NS}}}Signature"):
+        for sig in root.findall(_ds_element("Signature")):
             sig.getparent().remove(sig)
-        for sig in root.findall(f".//{{{DS_NS}}}Signature"):
+        for sig in root.findall(f".//{_ds_element('Signature')}"):
             sig.getparent().remove(sig)
 
-        # 1. Canonicalize the document (without Signature) for DigestValue
-        c14n_xml = etree.tostring(root, method="c14n", exclusive=False)
-        digest_value = base64.b64encode(hashlib.sha1(c14n_xml).digest()).decode()
+        # 1. Canonicalize what the Reference points to: the whole document (URI="") or the element with that Id
+        target = root
+        if reference_uri.startswith("#"):
+            found = root.xpath("//*[@Id=$id]", id=reference_uri[1:])
+            if not found:
+                raise ValueError(f"Elemento com Id {reference_uri[1:]} nao encontrado para assinar")
+            # shortcut: c14n do libxml2 num trecho interno sai com xmlns="" indevido; canoniza uma cópia isolada.
+            # Vale enquanto o elemento só depende do namespace padrão (caso da DPS); outros prefixos herdados se perdem.
+            target = etree.fromstring(etree.tostring(found[0]))
+        c14n_xml = etree.tostring(target, method="c14n", exclusive=False)
+        digest_value = base64.b64encode(
+            hashlib.sha256(c14n_xml).digest() if self.use_sha256 else hashlib.sha1(c14n_xml).digest()
+        ).decode()
 
-        # 2. Build SignedInfo
-        signed_info = self._build_signed_info(digest_value, reference_uri)
+        # 2. Build SignedInfo as XML string for correct namespace handling
+        # Compacto (sem quebra de linha/recuo): o fisco recusa caracteres de edição entre as tags.
+        signed_info_xml = (
+            f'<SignedInfo xmlns="{DS_NS}">'
+            f'<CanonicalizationMethod Algorithm="{C14N_ALG}"/>'
+            f'<SignatureMethod Algorithm="{self._sig_alg}"/>'
+            f'<Reference URI="{reference_uri}">'
+            f'<Transforms><Transform Algorithm="{TRANSFORM_ENVELOPED}"/><Transform Algorithm="{TRANSFORM_C14N}"/></Transforms>'
+            f'<DigestMethod Algorithm="{self._digest_alg}"/>'
+            f'<DigestValue>{digest_value}</DigestValue>'
+            f'</Reference></SignedInfo>'
+        )
+        signed_info = etree.fromstring(signed_info_xml.encode("utf-8"))
 
-        # 3. Canonicalize SignedInfo and sign it
-        signed_info_c14n = etree.tostring(signed_info, method="c14n", exclusive=False)
+        # 3. Canonicalize SignedInfo with exclusive C14N and sign it
+        signed_info_c14n = etree.tostring(signed_info, method="c14n", exclusive=True)
         signature_bytes = self.cert.private_key.sign(
             signed_info_c14n,
             padding.PKCS1v15(),
-            hashes.SHA1(),
+            self._hash_alg,
         )
         signature_value = base64.b64encode(signature_bytes).decode()
 
-        # 4. Build complete Signature element
-        sig_element = self._build_signature(signed_info, signature_value)
+        # 4. Build complete Signature element as XML string
+        signature_xml = (
+            f'<Signature xmlns="{DS_NS}">{etree.tostring(signed_info, encoding="unicode")}'
+            f'<SignatureValue>{signature_value}</SignatureValue>'
+            f'<KeyInfo><X509Data><X509Certificate>{self.cert.certificate_base64}</X509Certificate></X509Data></KeyInfo>'
+            f'</Signature>'
+        )
+        sig_element = etree.fromstring(signature_xml.encode("utf-8"))
 
         # 5. Append Signature to root
         root.append(sig_element)
 
-        return etree.tostring(root, encoding="unicode", xml_declaration=False)
-
-    def _build_signed_info(self, digest_value: str, reference_uri: str) -> etree._Element:
-        si = etree.Element(f"{{{DS_NS}}}SignedInfo", nsmap={"ds": DS_NS})
-        si.tag = f"{{{DS_NS}}}SignedInfo"
-
-        c14n = etree.SubElement(si, f"{{{DS_NS}}}CanonicalizationMethod")
-        c14n.set("Algorithm", C14N_ALG)
-
-        sig_method = etree.SubElement(si, f"{{{DS_NS}}}SignatureMethod")
-        sig_method.set("Algorithm", SIG_ALG)
-
-        ref = etree.SubElement(si, f"{{{DS_NS}}}Reference")
-        ref.set("URI", reference_uri)
-
-        transforms = etree.SubElement(ref, f"{{{DS_NS}}}Transforms")
-        t1 = etree.SubElement(transforms, f"{{{DS_NS}}}Transform")
-        t1.set("Algorithm", TRANSFORM_ENVELOPED)
-        t2 = etree.SubElement(transforms, f"{{{DS_NS}}}Transform")
-        t2.set("Algorithm", TRANSFORM_C14N)
-
-        dm = etree.SubElement(ref, f"{{{DS_NS}}}DigestMethod")
-        dm.set("Algorithm", DIGEST_ALG)
-
-        dv = etree.SubElement(ref, f"{{{DS_NS}}}DigestValue")
-        dv.text = digest_value
-
-        return si
-
-    def _build_signature(self, signed_info: etree._Element, signature_value: str) -> etree._Element:
-        sig = etree.Element(f"{{{DS_NS}}}Signature", nsmap={"ds": DS_NS})
-        # Re-tag without prefix for clean output
-        sig.tag = f"{{{DS_NS}}}Signature"
-
-        sig.append(signed_info)
-
-        sv = etree.SubElement(sig, f"{{{DS_NS}}}SignatureValue")
-        sv.text = signature_value
-
-        ki = etree.SubElement(sig, f"{{{DS_NS}}}KeyInfo")
-        x509 = etree.SubElement(ki, f"{{{DS_NS}}}X509Data")
-        x509cert = etree.SubElement(x509, f"{{{DS_NS}}}X509Certificate")
-        x509cert.text = self.cert.certificate_base64
-
-        return sig
+        # Always include UTF-8 XML declaration for SEFIN Nacional compatibility
+        return etree.tostring(root, encoding="UTF-8", xml_declaration=True).decode("utf-8")
 
     def sign_rps(self, rps_xml: str) -> str:
         return self.sign_xml(rps_xml)

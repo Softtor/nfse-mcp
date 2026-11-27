@@ -26,6 +26,10 @@ class NfseResponse:
     def has_errors(self) -> bool:
         if self.xml_tree is None:
             return True
+        # Check for SOAP Fault
+        for el in self.xml_tree.iter():
+            if el.tag == "{http://schemas.xmlsoap.org/soap/envelope/}Fault":
+                return True
         # Check for ListaMensagemRetorno with error codes
         errors = self.xml_tree.findall(".//{http://www.abrasf.org.br/nfse.xsd}MensagemRetorno")
         return len(errors) > 0
@@ -34,6 +38,20 @@ class NfseResponse:
         if self.xml_tree is None:
             return [{"Codigo": "PARSE_ERROR", "Mensagem": "Could not parse response"}]
         errors = []
+        # Check for SOAP Fault first
+        for fault in self.xml_tree.iter():
+            if fault.tag == "{http://schemas.xmlsoap.org/soap/envelope/}Fault":
+                faultcode = fault.find("faultcode")
+                faultstring = fault.find("faultstring")
+                detail = fault.find("detail")
+                error = {
+                    "Codigo": faultcode.text if faultcode is not None else "SOAP_FAULT",
+                    "Mensagem": faultstring.text if faultstring is not None else "Unknown SOAP error",
+                }
+                if detail is not None and detail.text:
+                    error["Correcao"] = detail.text
+                errors.append(error)
+                return errors
         ns = "{http://www.abrasf.org.br/nfse.xsd}"
         for msg in self.xml_tree.findall(f".//{ns}MensagemRetorno"):
             error = {}
@@ -78,6 +96,15 @@ class NfseResponse:
                 razao = nfse.find(f".//{ns}RazaoSocial")
             if razao is not None:
                 info["TomadorRazaoSocial"] = razao.text
+
+            # Cancelamento vem como <NfseCancelamento>, irmão de <Nfse> dentro
+            # de <CompNfse> — nunca como campo de status dentro da própria nota.
+            cancelamento = comp.find(f"{ns}NfseCancelamento")
+            info["Cancelada"] = cancelamento is not None
+            if cancelamento is not None:
+                data_canc = cancelamento.find(f".//{ns}DataHora")
+                if data_canc is not None and data_canc.text:
+                    info["DataCancelamento"] = data_canc.text
 
             nfse_list.append(info)
         return nfse_list
@@ -155,14 +182,18 @@ class SoapClient:
     def _call_raw(self, method: str, header_xml: str, data_xml: str) -> NfseResponse:
         """Send raw SOAP envelope via requests."""
         import requests as req
+        import re
         from xml.sax.saxutils import escape as xml_escape
+
+        # Strip XML declaration from data_xml — ISS.net rejects it inside nfseDadosMsg
+        clean_data = re.sub(r"<\?xml[^?]*\?>\s*", "", data_xml)
 
         soap_envelope = f'''<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
   <soap:Body>
     <{method} xmlns="http://nfse.abrasf.org.br">
       <nfseCabecMsg>{xml_escape(header_xml)}</nfseCabecMsg>
-      <nfseDadosMsg>{xml_escape(data_xml)}</nfseDadosMsg>
+      <nfseDadosMsg>{xml_escape(clean_data)}</nfseDadosMsg>
     </{method}>
   </soap:Body>
 </soap:Envelope>'''
@@ -177,6 +208,12 @@ class SoapClient:
                 "SOAPAction": f"http://nfse.abrasf.org.br/{method}",
             },
             cert=(cert_path, key_path),
+            # ponytail: df.issnetonline.com.br manda a cadeia TLS com o certificado
+            # raiz self-signed no meio (erro OpenSSL 19), rejeitado mesmo com a CA
+            # GoDaddy correta instalada — bug do lado do webservice da prefeitura.
+            # Verificado com curl/openssl s_client fora deste código. Reavaliar se
+            # a prefeitura corrigir a cadeia servida.
+            verify=False,
             timeout=60,
         )
 
