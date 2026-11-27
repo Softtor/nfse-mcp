@@ -37,3 +37,14 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nfse_mcp"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"schemas/nacional" = "nfse_mcp/schemas/nacional"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    # verificador independente de assinatura nos testes de xml_signer.
+    # nao e usado em runtime: o signer e manual porque signxml bloqueia SHA-1.
+    "signxml>=4.4.0",
+]

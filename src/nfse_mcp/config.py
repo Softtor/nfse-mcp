@@ -18,6 +18,7 @@ class ProviderConfig:
     simples_nacional: int  # 1=sim, 2=nao
     regime_tributacao: int  # 6=ME/EPP
     incentivo_fiscal: int  # 1=sim, 2=nao
+    aliquota_simples: str = ""  # % aproximado de tributos do Simples (pTotTribSN da NFS-e nacional)
 
 
 @dataclass
@@ -57,6 +58,7 @@ def load_config() -> Config:
         simples_nacional=int(os.getenv("NFSE_PROVIDER_SIMPLES_NACIONAL", "1")),
         regime_tributacao=int(os.getenv("NFSE_PROVIDER_REGIME_TRIBUTACAO", "6")),
         incentivo_fiscal=int(os.getenv("NFSE_PROVIDER_INCENTIVO_FISCAL", "2")),
+        aliquota_simples=os.getenv("NFSE_PROVIDER_ALIQUOTA_SIMPLES", ""),
     )
 
     service_defaults = ServiceDefaults(

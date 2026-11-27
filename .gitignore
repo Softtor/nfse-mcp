@@ -32,6 +32,18 @@ build/
 data/clients.json
 data/nfse_log.json
 data/rps_counter.json
+data/cancel_log.json
+data/municipality_cache.json
+
+# Capturas de request/response para depuração (contêm dados de notas reais)
+data/cancel_request_*.xml
+data/cancel_response_*.xml
+
+# Ferramentas locais
+.serena/
+
+# Claude Code local settings (sensível — não commitar)
+.claude/settings.local.json
 
 # IDE / OS
 .vscode/
@@ -41,3 +53,9 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Estado e notas reais geradas em runtime
+data/dps_counter.json
+data/xml/
+certs/
+*.xlsx

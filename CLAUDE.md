@@ -6,9 +6,9 @@ Guia para o Claude Code ao trabalhar neste projeto.
 
 MCP Server em Python para emitir NFS-e (Nota Fiscal de Serviço Eletrônica) em Brasília/DF através do webservice ISS.net (padrão ABRASF 2.04). Permite emissão, consulta, cancelamento e gerenciamento de clientes via prompt do Claude Code ou CSV.
 
-**Prestador:** Softtor Soluções Transformadoras LTDA
-- CNPJ: 33.779.923/0001-42
-- Inscrição Municipal: 0791927900180
+**Prestador:** Prestador Exemplo LTDA
+- CNPJ: 11.222.333/0001-81
+- Inscrição Municipal: 1234567
 - Regime: Simples Nacional ME/EPP (regime 6)
 - Serviço: Suporte em TI (CNAE 6209-1/00, Item LC116: 1.07)
 
@@ -35,19 +35,28 @@ nfse-mcp/
     └── schema_v204.xsd     # XSD ABRASF 2.04 (referência)
 ```
 
-## Tools MCP Disponíveis (9)
+## Tools MCP Disponíveis (18)
 
 | Tool | Descrição |
 |------|-----------|
 | `lookup_cnpj` | Consulta dados de empresa via BrasilAPI |
 | `register_client` | Cadastra tomador (auto-preenche via CNPJ) |
 | `list_clients` | Lista clientes cadastrados |
-| `emit_nfse` | Emite NFS-e individual |
+| `emit_nfse` | Emite NFS-e via ABRASF/ISS.net (para municípios com emissor próprio) |
 | `emit_nfse_batch` | Emite lote via CSV (sequencial, uma por uma) |
 | `get_nfse_link` | Retorna URLs de visualização/autenticidade |
 | `cancel_nfse` | Cancela NFS-e emitida |
 | `list_nfse` | Lista NFS-e por período com valores |
+| `list_cancelled_nfse` | Lista NFS-e canceladas (log local `data/cancel_log.json`) |
 | `query_cadastral_data` | Dados cadastrais do prestador no webservice |
+| `emit_nfse_nacional` | Emite NFS-e via SEFIN Nacional (apenas para municípios com emissor nacional) |
+| `emit_nfse_unificado` | Emite escolhendo o provider automaticamente (SEFIN ou ABRASF) via `NfseRouterService` |
+| `consultar_nfse_nacional` | Consulta NFS-e pela chave de acesso (SEFIN Nacional) |
+| `consultar_parametros_municipais` | Consulta convênio, alíquotas e regimes (SEFIN Nacional) |
+| `verificar_habilitacao_municipio` | Verifica se o município usa emissor próprio ou nacional |
+| `list_nfse_nacional` | Lista as NFS-e nacionais do log local (só as emitidas por esta ferramenta) |
+| `baixar_nfse_nacional` | Grava o XML da NFS-e nacional (e o PDF se o ADN devolver) e dá o link da Consulta Pública |
+| `cancelar_nfse_nacional` | Cancela NFS-e nacional `emitida` no log; sem `confirmar=True` só mostra a prévia |
 
 ## Webservice ISS.net Brasília
 
@@ -123,7 +132,7 @@ O `zeep` infere namespace errado do WSDL. Usar SOAP raw via `requests` com envel
 ### 9. Certificado A1 PFX
 Configurar caminho no `.env` via `NFSE_CERTIFICATE_PATH` (certificado ICP-Brasil, renovado anualmente).
 Senha: configurar via `NFSE_CERTIFICATE_PASSWORD` no `.env` local (nunca commitar).
-Tipo: ICP-Brasil AC SOLUTI Multipla v5 (para o prestador Softtor).
+Tipo: ICP-Brasil AC SOLUTI Multipla v5 (para o prestador).
 
 ### 10. RPS Auto-numbering via ConsultarRpsDisponivel
 Nunca incrementar RPS localmente. Sempre buscar o próximo disponível no webservice:
@@ -172,10 +181,10 @@ NFSE_ENVIRONMENT=production
 NFSE_CERTIFICATE_PATH=/caminho/local/para/certificado.p12
 NFSE_CERTIFICATE_PASSWORD=sua-senha-do-certificado
 
-# Prestador (Softtor)
-NFSE_PROVIDER_CNPJ=33779923000142
-NFSE_PROVIDER_IM=0791927900180
-NFSE_PROVIDER_RAZAO_SOCIAL=SOFTTOR SOLUCOES TRANSFORMADORAS LTDA
+# Prestador (exemplo)
+NFSE_PROVIDER_CNPJ=11222333000181
+NFSE_PROVIDER_IM=1234567
+NFSE_PROVIDER_RAZAO_SOCIAL=PRESTADOR EXEMPLO LTDA
 NFSE_PROVIDER_SIMPLES_NACIONAL=1       # 1=Sim, 2=Não
 NFSE_PROVIDER_REGIME_TRIBUTACAO=6      # 6=ME/EPP
 NFSE_PROVIDER_INCENTIVO_FISCAL=2       # 2=Não
@@ -227,7 +236,28 @@ python-dotenv>=1.0.0  # .env
 
 ## Integração com Claude Code
 
-Registro em `~/.claude/mcp.json`:
+O Claude Code lê a configuração de MCP de `~/.claude.json` (escopo user/global) ou de um
+`.mcp.json` na raiz do projeto (escopo project). **Não existe mais `~/.claude/mcp.json`.**
+
+### Registro (recomendado: escopo user)
+
+Assim o servidor fica disponível em qualquer sessão, não só dentro deste repositório:
+
+```bash
+claude mcp add nfse -s user -- uv --directory /caminho/absoluto/para/nfse-mcp run nfse-mcp
+```
+
+Verificar o registro:
+
+```bash
+claude mcp list
+claude mcp get nfse
+```
+
+### Alternativa: escopo project (`.mcp.json` na raiz)
+
+Só carrega quando o cwd da sessão é este repositório — útil para versionar a config:
+
 ```json
 {
   "mcpServers": {
@@ -239,6 +269,18 @@ Registro em `~/.claude/mcp.json`:
   }
 }
 ```
+
+### ⚠️ Armadilhas do registro
+
+- **Tools MCP só carregam no início da sessão.** Depois de registrar, reinicie a sessão
+  (ou use `/mcp` para reconectar) — caso contrário as tools `mcp__nfse__*` não aparecem.
+- **Primeiro start é lento.** Não é necessário rodar `uv sync` antes: o `uv run` resolve as
+  dependências sozinho na primeira invocação, mas isso pode levar o handshake inicial a
+  estourar o timeout uma vez. Se falhar, rode `uv sync` manualmente e reinicie.
+- **Use caminho absoluto** em `--directory`. O servidor é iniciado a partir do cwd da
+  sessão, que raramente é o diretório do projeto.
+- **O `.env` é lido do diretório do projeto**, não do cwd da sessão — por isso o
+  `--directory` é obrigatório.
 
 ## Códigos de Erro Comuns do Webservice
 
@@ -254,11 +296,157 @@ Registro em `~/.claude/mcp.json`:
 | E183 | Cabeçalho fora do padrão | Usar `versao="1.00"` no cabecalho |
 | E190 | Certificado digital inválido | Verificar PFX e senha |
 | E215 | Item incompatível com código tributação | Usar combinação correta da planilha CNAE x LS |
-| L003 | Código de tributação não pertence ao contribuinte | Usar `CodigoTributacaoMunicipio` registrado para a Softtor (ex: 107) |
+| L003 | Código de tributação não pertence ao contribuinte | Usar `CodigoTributacaoMunicipio` registrado para o prestador (ex: 107) |
 | L016 | Data competência fora da vigência | Verificar período de vigência da atividade |
+
+## SEFIN Nacional NFS-e (Nova Camada ACL)
+
+A partir de maio/2026, o projeto suporta também a **SEFIN Nacional NFS-e** (padrão nacional) como segundo provider, além do ISS.net de Brasília.
+
+### Arquitetura
+
+```
+src/nfse_mcp/
+  ports/                     # Interfaces abstratas (domínio)
+    service_invoice_provider.py
+    municipal_parameter_provider.py
+  abrasf/                    # Provider ISS.net/ABRASF 2.04 (SOAP)
+    xml_builder.py
+    soap_client.py
+  sefin_nacional/            # Provider SEFIN Nacional (REST + mTLS)
+    config.py
+    client.py                # HTTP client mTLS
+    provider.py              # Implementação das interfaces
+    mapper.py                # Domain ↔ DPS XML ↔ JSON
+    dps_xml_builder.py       # XML DPS v1.00
+    evento_xml_builder.py    # XML de eventos
+    xsd_validator.py         # Validação local com schemas
+    errors.py                # Erros normalizados
+```
+
+### ⚠️ Diferença Crítica: Aderido ao Sistema vs Emissor Público Nacional
+
+Um município pode estar **aderido ao Sistema Nacional NFS-e** (compartilhando dados no ADN) mas **não ter habilitado os emissores públicos nacionais** (Web, Mobile, API). Neste caso, o município mantém seu **emissor próprio** (ex: ISS.net, Betha, IPM) e o contribuinte deve continuar usando o webservice municipal.
+
+**Brasília/DF (5300108) — desde a competência 11/2026 emite pelo Emissor Nacional.**
+O ISS.net recusa RPS de optante do Simples com competência >= 01/11/2026 (erro L120). O prestador
+(ME/EPP) emite pelo `emit_nfse_nacional`; o DF está em `EMISSOR_NACIONAL_SET` (`municipality_data.py`).
+Competência anterior a 11/2026 ainda é ISS.net (`emit_nfse`).
+
+**Armadilhas SEFIN Nacional (provadas em 04/11/2026):**
+- Produção e produção restrita rodam leiautes diferentes: `LEIAUTE_POR_TPAMB` (`nacional/dps_xml_builder.py`) liga cada tpAmb ao XSD oficial em `schemas/nacional/oficial-*`. Produção restrita exige `finNFSe`; produção ainda o recusa. Quando a produção mudar, troque a entrada 1.
+- A recusa vem com `Complemento` (diz o campo exato); o cliente junta na descrição.
+- Assinatura: `Reference URI="#<Id do infDPS>"` (URI vazia é recusada) e c14n de cópia isolada do infDPS (o c14n do libxml2 num trecho interno põe `xmlns=""` e dá E0714). SHA-1 é aceito.
+- Regras do DF/ME-EPP: sem `cTribMun` (o 104/107 do ISS.net dá E0314), sem `IM` (E0120), `pTotTribSN` = `NFSE_PROVIDER_ALIQUOTA_SIMPLES` em vez de `indTotTrib` (E0712), sem `tribFed`. `opSimpNac`/`regEspTrib` são traduzidos do padrão ABRASF em `sefin_nacional/mapper.py`.
+- nDPS é reservado em `data/dps_counter.json` antes do envio; POST não repete sozinho. Resposta perdida (timeout, 5xx) vira entrada `pendente` no log e bloqueia nova nota do mesmo tomador até a consulta por DPS resolver.
+- Teste sem valor fiscal: `SEFIN_ENVIRONMENT=production_restricted` no comando sobrepõe o `.env` (load_dotenv não sobrescreve).
+- Consulta de parâmetros municipais usa o código com pontos (`01.04.01.000`).
+- `cTribNac` é conferido antes de reservar o nDPS contra `nacional/lista_servico_nacional.json` (Anexo B v1.01, 22/01/2026); código fora dela a SEFIN recusa com E0310. Nova versão do Anexo B: regerar o JSON a partir da aba LISTA.SERV.NAC.
+
+**Armadilhas do evento de cancelamento (provadas em produção restrita, 04/11/2026):**
+- O corpo do POST `/nfse/{chave}/eventos` é `{"pedidoRegistroEventoXmlGZipB64": ...}`; com outro nome a SEFIN dá HTTP 500 genérico ("An error has occurred."). Swagger: `{base_url}/swagger/docs/v1` (com mTLS).
+- `pedRegEvento` segue o XSD (`tiposEventos_v1.01.xsd`, igual nos dois leiautes), não o texto do manual: `infPedReg@Id` = `PRE` + chave + `101101`, assinatura com `Reference URI="#<Id>"`, `versao`/`verAplic` 1.00, tpAmb de `SefinNacionalConfig.tp_amb`.
+- `GET /nfse/{chave}/eventos` dá 405. Use `GET /nfse/{chave}/eventos/101101/1`: 404 (JSON) = sem cancelamento; 200 traz `eventos[]` com `chaveAcesso`/`tipoEvento`.
+- PDF: `GET {SEFIN}/danfse` dá 501; `GET {ADN}/danfse/{chave}` deu 503/404 (NT 008/2026). O `baixar_nfse_nacional` tenta uma vez e segue só com XML + link.
+
+**Regra de ouro:**
+- Se o município mantém emissor próprio → use **`emit_nfse`** (ABRASF/ISS.net via SOAP)
+- Se o município habilitou emissores públicos nacionais → use **`emit_nfse_nacional`** (SEFIN Nacional REST API)
+- Use **`verificar_habilitacao_municipio(codigo_ibge)`** para descobrir qual provider usar
+
+### Principais Diferenças Técnicas (ABRASF vs SEFIN Nacional)
+
+| Aspecto | ISS.net Brasília (emissor próprio) | SEFIN Nacional (emissor público) |
+|---------|-----------------------------------|----------------------------------|
+| Protocolo | SOAP | REST |
+| Formato | XML puro | JSON envelope + XML DPS (GZip+Base64) |
+| Assinatura | SHA-1 | SHA-256 |
+| Emissão | `GerarNfse` | `POST /nfse` |
+| Consulta | SOAP methods | `GET /nfse/{chaveAcesso}` |
+| Cancelamento | SOAP `CancelarNfse` | `POST /nfse/{chaveAcesso}/eventos` |
+| Parâmetros municipais | Não disponível | `GET /parametros_municipais/...` |
+
+### Ambientes
+
+- **Produção Restrita:** `https://sefin.producaorestrita.nfse.gov.br/API/SefinNacional`
+- **Produção:** `https://sefin.nfse.gov.br/SefinNacional`
+
+### Autenticação
+
+- mTLS com certificado digital ICP-Brasil (A1 ou A3, e-CNPJ preferencial).
+- Sem token adicional. O CNPJ do certificado deve corresponder ao CNPJ do prestador.
+
+### MCP Tools SEFIN Nacional
+
+| Tool | Descrição |
+|------|-----------|
+| `emit_nfse_nacional` | Emite NFS-e via SEFIN Nacional (apenas municípios com emissor público) |
+| `emit_nfse_unificado` | Emite NFS-e usando o provider correto automaticamente (SEFIN ou ABRASF) |
+| `consultar_nfse_nacional` | Consulta NFS-e pela chave de acesso |
+| `consultar_parametros_municipais` | Consulta convênio, alíquotas e regimes |
+| `verificar_habilitacao_municipio` | Verifica se o município usa emissor próprio ou nacional, e sugere o provider correto |
+| `list_nfse_nacional` | Lista NFS-e nacionais do log local (DPS, data, tomador, valor, status, chave) |
+| `baixar_nfse_nacional` | XML em `data/xml/NFSe-<n>-<chave>.xml` + PDF do ADN quando houver + link da Consulta Pública |
+| `cancelar_nfse_nacional` | Evento e101101; prévia por padrão, envio só com `confirmar=True` depois do ok do usuário |
+
+### NfseRouterService (Fallback Inteligente)
+
+O `NfseRouterService` orquestra a emissão automaticamente entre SEFIN Nacional e ABRASF/ISS.net:
+
+```
+Recebe requisição de emissão
+    │
+    ├──► Município conhecido como emissor próprio
+    │    ├──► ABRASF suporta? → Emite via ABRASF ✅
+    │    └──► ABRASF NÃO suporta → "Integração indisponível" ❌
+    │
+    ├──► Município conhecido como emissor nacional
+    │    └──► Emite via SEFIN Nacional ✅
+    │
+    └──► Município desconhecido
+         ├──► Tenta SEFIN Nacional
+         │    ├──► Sucesso → Emite ✅
+         │    ├──► E0039 → Fallback para ABRASF (se suportado) ✅
+         │    ├──► Não conveniado → Fallback para ABRASF (se suportado) ✅
+         │    └──► Outro erro → Fallback para ABRASF (se suportado) ✅
+         │
+         └──► SEFIN falhou e ABRASF não suporta → Erro informativo ❌
+```
+
+**Uso recomendado para API unificada:**
+```python
+from nfse_mcp.application.services.router_service import NfseRouterService
+result = router.issue_invoice(command)
+```
+
+**Municípios suportados por ABRASF atualmente:** `{ "5300108" }` (Brasília/DF). Expandir conforme novas integrações forem implementadas.
+
+### Configuração (.env)
+
+```env
+SEFIN_ENVIRONMENT=production_restricted
+SEFIN_CERTIFICATE_PATH=/caminho/certificado.p12  # ou reutilizar NFSE_CERTIFICATE_PATH
+SEFIN_CERTIFICATE_PASSWORD=senha
+SEFIN_DEBUG=false
+SEFIN_SKIP_XSD_VALIDATION=false
+```
+
+### Testes
+
+```bash
+uv run pytest tests/ -v
+```
+
+### Documentação
+
+- `docs/research/sefin-nacional-map.md` — Mapeamento técnico completo da API
+- `docs/research/sefin-nacional-mvp-plan.md` — Plano do MVP, escopo, DTOs, testes
+
+---
 
 ## Referências
 
 - **Manual de integração:** Manual ABRASF 2.04 + guia ISS Brasília (portal `df.issnetonline.com.br`)
 - **Schemas XSD:** pasta `schemas/` deste repositório + documentação ABRASF em `abrasf.org.br/nfse.xsd`
 - **Planilha CNAE x LS x Atividade:** disponível no Manual de Orientação ao Contribuinte v2.04 do portal ISS Brasília
+- **SEFIN Nacional:** https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/documentacao-atual
