@@ -136,11 +136,21 @@ class ServiceContainer:
             from nfse_mcp.sefin_nacional.municipality_data import MunicipalityDataLoader
             self._router_service = NfseRouterService(
                 sefin_service=self.sefin_service(),
-                abrasf_service=self.abrasf_service(),
+                abrasf_service=_AbrasfSobDemanda(self.abrasf_service),
                 data_loader=MunicipalityDataLoader(),
                 config=self.config(),
             )
         return self._router_service
+
+
+class _AbrasfSobDemanda:
+    """Só monta o ABRASF (e pede o certificado dele) quando o roteador de fato escolhe esse provider."""
+
+    def __init__(self, fabrica):
+        self._fabrica = fabrica
+
+    def issue_invoice(self, command):
+        return self._fabrica().issue_invoice(command)
 
 
 # Global singleton container (appropriate for MCP stdio single-process model)

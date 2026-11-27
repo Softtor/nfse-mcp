@@ -164,3 +164,15 @@ class TestSupportedAbrasfSet:
 
     def test_random_municipality_not_supported(self):
         assert "9999999" not in SUPPORTED_ABRASF_MUNICIPALITIES
+
+
+def test_container_nao_monta_o_abrasf_quando_o_roteador_escolhe_a_sefin(monkeypatch):
+    from nfse_mcp.presentation.mcp.container import ServiceContainer
+
+    c = ServiceContainer()
+    montou_abrasf = []
+    monkeypatch.setattr(c, "abrasf_service", lambda: montou_abrasf.append(1))
+    monkeypatch.setattr(c, "sefin_service", lambda: object())
+    monkeypatch.setattr(c, "config", lambda: object())
+    c.router_service()
+    assert montou_abrasf == []  # sem NFSE_CERTIFICATE_PATH, só a SEFIN continua emitindo
