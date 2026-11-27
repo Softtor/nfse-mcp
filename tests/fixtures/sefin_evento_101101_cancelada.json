@@ -1,0 +1,14 @@
+{
+  "dataHoraProcessamento": "2026-11-04T15:52:36.8167984-03:00",
+  "tipoAmbiente": 2,
+  "versaoAplicativo": "SefinNacional_1.6.0",
+  "eventos": [
+    {
+      "chaveAcesso": "53001082211222333000181000000000000126116228598296",
+      "tipoEvento": 101101,
+      "numeroPedidoRegistroEvento": 1,
+      "dataHoraRecebimento": "2026-11-04T15:52:36.58",
+      "arquivoXml": "<omitido: evento assinado>"
+    }
+  ]
+}
