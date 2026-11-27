@@ -109,6 +109,15 @@ uv run nfse-mcp
 uv run python -c "from nfse_mcp.server import main; print('OK')"
 ```
 
+### Como testar
+
+```bash
+uv sync
+uv run pytest tests/ -v
+```
+
+Os testes usam dados fictícios (CNPJs de exemplo, certificado e servidor simulados) e não enviam nada à prefeitura nem à SEFIN. Para provar uma emissão de verdade, use o ambiente de homologação com um certificado seu (`SEFIN_ENVIRONMENT=production_restricted`) e os scripts de `scripts/`.
+
 Estrutura do projeto:
 
 ```
@@ -135,7 +144,7 @@ Para detalhes técnicos, armadilhas do webservice e fluxo de assinatura XML, vej
 - **Escopo geográfico:** funciona apenas com o webservice ISS.net de **Brasília/DF**. Outras prefeituras usam endpoints e variações do padrão ABRASF diferentes.
 - **Padrão:** ABRASF 2.04 apenas. Prefeituras em versões anteriores (1.00, 2.00) não são suportadas.
 - **Método de emissão:** `GerarNfse` individual. O `emit_nfse_batch` emite uma nota por vez (não usa `RecepcionarLoteRpsSincrono`, que apresenta problemas de validação não documentados no webservice de Brasília).
-- **Sem testes automatizados:** validação feita em produção contra notas reais. PRs com testes são muito bem-vindos.
+- **Testes:** a suíte automatizada (`tests/`) roda sem rede, sem certificado e sem `.env`. A emissão real só foi provada em produção.
 
 ## Contribuindo
 
